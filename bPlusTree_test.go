@@ -2,17 +2,27 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"math"
 	"math/rand"
+	"os"
 	"testing"
 )
 
 func TestBPlusTree(t *testing.T) {
-	m := make(map[int]float64)
+	m := make(map[int]any)
 	bPlusTree := MakeNew()
-	n := 1000
-	fmt.Println("bPlusTree := MakeNew()")
-	for i := 0; i < n; i++ {
+	output, err := os.Create("test_operations.txt")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	_, err = fmt.Fprintln(output, "bPlusTree := MakeNew()")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	for i := 0; i < 10000; i++ {
 		key := rand.Intn(1000)
 		if _, ok := m[key]; ok {
 			// 验证在BPlusTree中也存在
@@ -22,9 +32,9 @@ func TestBPlusTree(t *testing.T) {
 
 			// 已存在，则删除
 			delete(m, key)
-			fmt.Printf("bPlusTree.Delete(%v)\n", key)
+			fmt.Fprintf(output, "bPlusTree.Delete(%v)\n", key)
 			bPlusTree.Delete(key)
-			if !Diagnose(bPlusTree) {
+			if !Diagnose(bPlusTree, output) {
 				t.Errorf("diagnostic failed after Delete")
 			}
 
@@ -39,10 +49,10 @@ func TestBPlusTree(t *testing.T) {
 			}
 
 			// 不存在，则添加
-			m[key] = float64(key)
-			fmt.Printf("bPlusTree.Insert(%v, float64(%v))\n", key, key)
-			bPlusTree.Insert(key, float64(key))
-			if !Diagnose(bPlusTree) {
+			m[key] = key
+			fmt.Fprintf(output, "bPlusTree.Insert(%v, %v)\n", key, key)
+			bPlusTree.Insert(key, key)
+			if !Diagnose(bPlusTree, output) {
 				t.Errorf("diagnostic failed after Insert")
 			}
 
@@ -52,11 +62,20 @@ func TestBPlusTree(t *testing.T) {
 			}
 		}
 	}
+	err = output.Close()
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
 }
 
 // Diagnose 检查结构是否正确
-func Diagnose(t *BPlusTree) bool {
-	if t.root != nil {
+func Diagnose(t *BPlusTree, output io.Writer) bool {
+	if t.root == nil {
+		return true
+	}
+	leafOccurred := false
+	if !t.root.isLeaf {
 		queue := make([]*UnionNode, 0, 2*MaxChildren)
 		queue = append(queue, t.root)
 		var cursor *UnionNode
@@ -64,74 +83,79 @@ func Diagnose(t *BPlusTree) bool {
 			cursor = queue[0]
 			queue = queue[1:]
 			if !cursor.isLeaf {
+				if leafOccurred {
+					// 因为是层序遍历，所以如果出现过叶子节点，就不可能再出现内部节点
+					fmt.Fprintf(output, "错误：叶子节点不在同一深度")
+				}
 				if cursor.childNum != len(cursor.children) {
-					fmt.Println("错误: 子节点数量不符。")
+					fmt.Fprintf(output, "错误: 子节点数量不符。")
 					return false
 				}
 				if cursor.parent != nil && (len(cursor.children) < MinChildren || MaxChildren < len(cursor.children)) {
-					fmt.Println("错误: InternalNode 大小不合法。")
+					fmt.Fprintf(output, "错误: InternalNode 大小不合法。")
 					return false
 				}
 				for idx, childPtr := range cursor.children {
 					if childPtr == nil {
-						fmt.Println("错误: 不应有空指针的子节点")
+						fmt.Fprintf(output, "错误: 不应有空指针的子节点")
 						return false
 					}
 					if childPtr.parent != cursor {
-						fmt.Println("错误: 父子节点关系错误")
+						fmt.Fprintf(output, "错误: 父子节点关系错误")
 						return false
 					}
 					queue = append(queue, childPtr)
 					if !childPtr.isLeaf {
 						if idx == 0 {
 							if childPtr.leftPtr != nil {
-								fmt.Println("错误: 不应有左兄弟")
+								fmt.Fprintf(output, "错误: 不应有左兄弟")
 								return false
 							}
 						}
 						if idx == len(cursor.children)-1 {
 							if childPtr.rightPtr != nil {
-								fmt.Println("错误: 不应有右兄弟")
+								fmt.Fprintf(output, "错误: 不应有右兄弟")
 								return false
 							}
 						}
 						if childPtr.leftPtr != nil && childPtr.leftPtr.rightPtr != childPtr {
-							fmt.Println("错误: 左右兄弟不一致1")
+							fmt.Fprintf(output, "错误: 左右兄弟不一致1")
 							return false
 						}
 						if childPtr.rightPtr != nil && childPtr.rightPtr.leftPtr != childPtr {
-							fmt.Println("错误: 左右兄弟不一致2")
+							fmt.Fprintf(output, "错误: 左右兄弟不一致2")
 							return false
 						}
 					} else if childPtr.isLeaf {
 						if childPtr.leftPtr != nil && childPtr.leftPtr.rightPtr != childPtr {
-							fmt.Println("错误: 左右兄弟不一致3")
+							fmt.Fprintf(output, "错误: 左右兄弟不一致3")
 							return false
 						}
 						if childPtr.rightPtr != nil && childPtr.rightPtr.leftPtr != childPtr {
-							fmt.Println("错误: 左右兄弟不一致4")
+							fmt.Fprintf(output, "错误: 左右兄弟不一致4")
 							return false
 						}
 					}
 
 					maxKey, minKey := childPtr.getMaxMinKey()
 					if idx-1 >= 0 && cursor.keys[idx-1] > minKey {
-						fmt.Println("错误: 子节点的最小值大于了父节点对应的key")
+						fmt.Fprintf(output, "错误: 子节点的最小值大于了父节点对应的key")
 						return false
 					}
 					if idx < len(cursor.keys) && cursor.keys[idx] < maxKey {
-						fmt.Println("错误: 子节点的最大值大于了父节点对应的key的后面一个key")
+						fmt.Fprintf(output, "错误: 子节点的最大值大于了父节点对应的key的后面一个key")
 						return false
 					}
 				}
 			} else if cursor.isLeaf {
+				leafOccurred = true
 				if cursor.parent != nil && len(cursor.kvPairs) < MinKeys || MaxKeys < len(cursor.kvPairs) {
-					fmt.Println("错误: LeafNode 大小不合法。")
+					fmt.Fprintf(output, "错误: LeafNode 大小不合法。")
 					return false
 				}
 				for idx := range cursor.kvPairs {
 					if idx-1 > 0 && cursor.kvPairs[idx].key < cursor.kvPairs[idx-1].key {
-						fmt.Println("错误: KVPair内部顺寻不一致。")
+						fmt.Fprintf(output, "错误: KVPair内部顺寻不一致。")
 						return false
 					}
 				}
@@ -139,25 +163,23 @@ func Diagnose(t *BPlusTree) bool {
 		}
 
 	} else {
-		// 没有root的话，最多只能有一个leafNode
-		if t.firstLeafNode != nil {
-			if t.firstLeafNode.parent != nil {
-				fmt.Println("错误: 不应有parent。")
+		// root为叶节点的话，最多只能有一个leafNode
+		if t.root.parent != nil {
+			fmt.Fprintf(output, "错误: 不应有parent。")
+			return false
+		}
+		if t.root.leftPtr != nil {
+			fmt.Fprintf(output, "错误: 不应有leftPtr。")
+			return false
+		}
+		if t.root.rightPtr != nil {
+			fmt.Fprintf(output, "错误: 不应有rightPtr。")
+			return false
+		}
+		for idx := range t.root.kvPairs {
+			if idx > 0 && t.root.kvPairs[idx].key < t.root.kvPairs[idx-1].key {
+				fmt.Fprintf(output, "错误: KVPair内部顺寻不一致。")
 				return false
-			}
-			if t.firstLeafNode.leftPtr != nil {
-				fmt.Println("错误: 不应有leftPtr。")
-				return false
-			}
-			if t.firstLeafNode.rightPtr != nil {
-				fmt.Println("错误: 不应有rightPtr。")
-				return false
-			}
-			for idx := range t.firstLeafNode.kvPairs {
-				if idx > 0 && t.firstLeafNode.kvPairs[idx].key < t.firstLeafNode.kvPairs[idx-1].key {
-					fmt.Println("错误: KVPair内部顺寻不一致。")
-					return false
-				}
 			}
 		}
 	}

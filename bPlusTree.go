@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"slices"
 )
 
@@ -58,7 +57,7 @@ func newUnionNode(parent *UnionNode, leftPtr *UnionNode, rightPtr *UnionNode, is
 	return node
 }
 
-func (node *UnionNode) insertKeyValue(t *BPlusTree, key int, value float64) {
+func (node *UnionNode) insertKeyValue(t *BPlusTree, key int, value any) {
 	idx, found := slices.BinarySearchFunc(node.kvPairs, key, func(kvPair *KVPair, k int) int {
 		return kvPair.key - k
 	})
@@ -97,11 +96,7 @@ func (node *UnionNode) removeChild(t *BPlusTree, childNode *UnionNode) {
 					} else {
 						n = node.children[1]
 					}
-					if !n.isLeaf {
-						t.root = n
-					} else {
-						t.root = nil
-					}
+					t.root = n
 					n.parent = nil
 				}
 			} else {
@@ -116,7 +111,7 @@ func (node *UnionNode) removeChild(t *BPlusTree, childNode *UnionNode) {
 			break
 		}
 	}
-	if node.childNum < MinChildren {
+	if node != t.root && node.childNum < MinChildren {
 		if !node.borrow() {
 			node.merge(t)
 		}
@@ -193,7 +188,7 @@ func (node *UnionNode) split(t *BPlusTree) {
 		node.children = node.children[:midKeyIdx+1]
 		node.childNum -= newINode.childNum
 
-		// 原本的ChildPtr不再是同一个父节点，更改对应的指针为 nil
+		// 原本的 ChildPtr 不再是同一个父节点，更改对应的指针为 nil
 		if !node.isLeaf {
 			node.children[len(node.children)-1].rightPtr = nil
 			newINode.children[0].leftPtr = nil
@@ -339,8 +334,8 @@ func (node *UnionNode) merge(t *BPlusTree) {
 			leftINode = node
 			node.keys = append(leftINode.keys, midKey)
 		} else {
-			fmt.Println("in *internalNode merge")
-			return // 无法合并
+			// 无法合并
+			panic("In *Union.merge error")
 		}
 		// 删除 nil 指针
 		if len(node.children)-1 == node.childNum {
@@ -397,19 +392,18 @@ func deleteNil(node *UnionNode) {
 
 type KVPair struct {
 	key   int
-	value float64
+	value any
 }
 
 type BPlusTree struct {
-	root          *UnionNode
-	firstLeafNode *UnionNode
+	root *UnionNode
 }
 
 func MakeNew() *BPlusTree {
 	return &BPlusTree{}
 }
 
-func (t *BPlusTree) Insert(key int, value float64) {
+func (t *BPlusTree) Insert(key int, value any) {
 	t.findLeafNode(key).insertKeyValue(t, key, value)
 }
 
@@ -417,7 +411,7 @@ func (t *BPlusTree) Delete(key int) bool {
 	return t.findLeafNode(key).removeKey(t, key)
 }
 
-func (t *BPlusTree) Get(key int) (float64, bool) {
+func (t *BPlusTree) Get(key int) (any, bool) {
 	leafNode := t.findLeafNode(key)
 	idx, found := slices.BinarySearchFunc(leafNode.kvPairs, key, func(kvPair *KVPair, k int) int {
 		return kvPair.key - k
@@ -425,45 +419,28 @@ func (t *BPlusTree) Get(key int) (float64, bool) {
 	if found {
 		return leafNode.kvPairs[idx].value, true
 	}
-	return 0.0, false
+	return nil, false
 }
 
 // 返回key所在的leafNode, 或者应该插入的leafNode
 func (t *BPlusTree) findLeafNode(key int) (target *UnionNode) {
 	if t.root == nil {
-		if t.firstLeafNode == nil {
-			t.firstLeafNode = newUnionNode(nil, nil, nil, true)
-			return t.firstLeafNode
+		t.root = newUnionNode(nil, nil, nil, true)
+		return t.root
+	}
+	if t.root.isLeaf {
+		return t.root
+	}
+	cursor := t.root
+	for {
+		idx, found := slices.BinarySearch(cursor.keys, key)
+		if found {
+			cursor = cursor.children[idx+1]
+		} else {
+			cursor = cursor.children[idx]
 		}
-		cursor := t.firstLeafNode
-		for {
-			for i := 0; i < len(cursor.kvPairs); i++ {
-				if cursor.kvPairs[i].key >= key {
-					return cursor
-				}
-			}
-			if cursor.rightPtr == nil {
-				return cursor
-			}
-			cursor = cursor.rightPtr
-		}
-	} else {
-		cursor := t.root
-		for {
-			idx, found := slices.BinarySearch(cursor.keys, key)
-			if cursor.children[0].isLeaf {
-				if found {
-					return cursor.children[idx+1]
-				} else {
-					return cursor.children[idx]
-				}
-			} else {
-				if found {
-					cursor = cursor.children[idx+1]
-				} else {
-					cursor = cursor.children[idx]
-				}
-			}
+		if cursor.isLeaf {
+			return cursor
 		}
 	}
 }
