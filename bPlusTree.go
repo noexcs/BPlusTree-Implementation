@@ -26,8 +26,7 @@ type UnionNode struct {
 	parent   *UnionNode
 	leftPtr  *UnionNode
 	rightPtr *UnionNode
-
-	isLeaf bool
+	isLeaf   bool
 
 	// internalNode field
 	keys     []int
@@ -42,8 +41,7 @@ func newUnionNode(parent *UnionNode, leftPtr *UnionNode, rightPtr *UnionNode, is
 		parent:   parent,
 		leftPtr:  leftPtr,
 		rightPtr: rightPtr,
-
-		isLeaf: isLeaf,
+		isLeaf:   isLeaf,
 	}
 	if isLeaf {
 		// 由于实现是每次添加后检查是否大于 MaxKeys 再进行分裂的，所以 kvPairs 最多能达到 MaxKeys + 1

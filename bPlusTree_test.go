@@ -146,7 +146,7 @@ func Diagnose(t *BPlusTree, output io.Writer) bool {
 						}
 					}
 
-					maxKey, minKey := childPtr.getMaxMinKey()
+					maxKey, minKey := getMaxMinKey(childPtr)
 					if idx-1 >= 0 && cursor.keys[idx-1] > minKey {
 						fmt.Fprintf(output, "错误: 子节点的最小值大于了父节点对应的key")
 						return false
@@ -195,7 +195,7 @@ func Diagnose(t *BPlusTree, output io.Writer) bool {
 	return true
 }
 
-func (node *UnionNode) getMaxMinKey() (max int, min int) {
+func getMaxMinKey(node *UnionNode) (max int, min int) {
 	if node.isLeaf {
 		if len(node.kvPairs) == 0 {
 			panic("Empty leafNode.")
@@ -216,7 +216,7 @@ func (node *UnionNode) getMaxMinKey() (max int, min int) {
 		}
 		max, min = math.MinInt, math.MaxInt
 		for i := 1; i < len(node.children); i++ {
-			maxKey, minKey := node.children[i].getMaxMinKey()
+			maxKey, minKey := getMaxMinKey(node.children[i])
 			if maxKey > max {
 				max = maxKey
 			}
