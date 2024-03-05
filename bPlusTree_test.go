@@ -22,7 +22,7 @@ func TestBPlusTree(t *testing.T) {
 		fmt.Println(err)
 		return
 	}
-	for i := 0; i < 10000; i++ {
+	for i := 0; i < 10_0000; i++ {
 		key := rand.Intn(1000)
 		if _, ok := m[key]; ok {
 			// 验证在BPlusTree中也存在

@@ -86,28 +86,17 @@ func (node *UnionNode) insertNode(t *BPlusTree, key int, childNode *UnionNode) {
 func (node *UnionNode) removeChild(t *BPlusTree, childNode *UnionNode) {
 	for idx, childPtr := range node.children {
 		if childPtr == childNode {
-			if len(node.keys) <= 1 {
-				node.children[idx] = nil
-				if node.parent == nil {
-					// root
-					var n *UnionNode
-					if node.children[0] != nil {
-						n = node.children[0]
-					} else {
-						n = node.children[1]
-					}
-					t.root = n
-					n.parent = nil
-				}
+			if idx-1 == -1 {
+				node.keys = node.keys[1:]
 			} else {
-				if idx-1 == -1 {
-					node.keys = node.keys[1:]
-				} else {
-					node.keys = append(node.keys[:idx-1], node.keys[idx:]...)
-				}
-				node.children = append(node.children[:idx], node.children[idx+1:]...)
+				node.keys = append(node.keys[:idx-1], node.keys[idx:]...)
 			}
+			node.children = append(node.children[:idx], node.children[idx+1:]...)
 			node.childNum -= 1
+			if node.parent == t.root && len(node.children) == 1 {
+				t.root = node.children[0]
+				t.root.parent = nil
+			}
 			break
 		}
 	}
@@ -124,96 +113,65 @@ func (node *UnionNode) removeKey(t *BPlusTree, key int) bool {
 	if found {
 		node.kvPairs = append(node.kvPairs[:idx], node.kvPairs[idx+1:]...)
 	}
-	if len(node.kvPairs) < MinKeys && node != t.root {
+	if node != t.root && len(node.kvPairs) < MinKeys {
 		if !node.borrow() {
-			if len(node.kvPairs) == 0 {
-				if node.leftPtr != nil {
-					node.leftPtr.rightPtr = node.rightPtr
-				}
-				if node.rightPtr != nil {
-					node.rightPtr.leftPtr = node.leftPtr
-				}
-				node.parent.removeChild(t, node)
-			} else {
-				node.merge(t)
-			}
+			node.merge(t)
 		}
 	}
 	return found
 }
 func (node *UnionNode) split(t *BPlusTree) {
+	newNode := newUnionNode(node.parent, node, node.rightPtr, node.isLeaf)
+	midKey := 0
 	if node.isLeaf {
-		midKVIdx := len(node.kvPairs) / 2
-
-		newLeafNode := newUnionNode(node.parent, node, node.rightPtr, true)
-		newLeafNode.kvPairs = append(newLeafNode.kvPairs, node.kvPairs[midKVIdx:]...)
-
-		node.kvPairs = node.kvPairs[:midKVIdx]
-		if node.rightPtr != nil {
-			node.rightPtr.leftPtr = newLeafNode
-		}
-		node.rightPtr = newLeafNode
-
-		if node.parent == nil {
-			parent := newUnionNode(nil, nil, nil, false)
-			parent.keys = append(parent.keys, newLeafNode.kvPairs[0].key)
-			parent.children = append(parent.children, node, newLeafNode)
-			parent.childNum += 2
-			node.parent = parent
-			newLeafNode.parent = parent
-			t.root = parent
-		} else {
-			node.parent.insertNode(t, newLeafNode.kvPairs[0].key, newLeafNode)
-		}
+		midKeyIdx := len(node.kvPairs) / 2
+		midKey = node.kvPairs[midKeyIdx].key
+		newNode.kvPairs = append(newNode.kvPairs, node.kvPairs[midKeyIdx:]...)
+		node.kvPairs = node.kvPairs[:midKeyIdx]
 	} else {
 		// midKeyIdx 处的key移到父节点中，对应的child指针作为新节点左边的指针
 		midKeyIdx := len(node.keys) / 2
-		midKey := node.keys[midKeyIdx]
+		midKey = node.keys[midKeyIdx]
 
-		newINode := newUnionNode(node.parent, node, node.rightPtr, false)
 		// 新的节点只包含 midKeyIdx 后面的key
-		newINode.keys = append(newINode.keys, node.keys[midKeyIdx+1:]...)
-		newINode.children = append(newINode.children, node.children[midKeyIdx+1:]...)
-		newINode.childNum += len(newINode.children)
+		newNode.keys = append(newNode.keys, node.keys[midKeyIdx+1:]...)
+		newNode.children = append(newNode.children, node.children[midKeyIdx+1:]...)
+		newNode.childNum += len(newNode.children)
 		// 更改新节点的孩子的父节点为新节点
-		for i := 0; i < len(newINode.children); i++ {
-			newINode.children[i].parent = newINode
+		for i := 0; i < len(newNode.children); i++ {
+			newNode.children[i].parent = newNode
 		}
 
-		if node.rightPtr != nil {
-			node.rightPtr.leftPtr = newINode
-		}
-		node.rightPtr = newINode
 		node.keys = node.keys[:midKeyIdx]
 		node.children = node.children[:midKeyIdx+1]
-		node.childNum -= newINode.childNum
+		node.childNum -= newNode.childNum
 
 		// 原本的 ChildPtr 不再是同一个父节点，更改对应的指针为 nil
-		if !node.isLeaf {
+		if !node.children[len(node.children)-1].isLeaf {
 			node.children[len(node.children)-1].rightPtr = nil
-			newINode.children[0].leftPtr = nil
+			newNode.children[0].leftPtr = nil
 		}
+	}
+	if node.rightPtr != nil {
+		node.rightPtr.leftPtr = newNode
+	}
+	node.rightPtr = newNode
+	if node.parent == nil {
+		parent := newUnionNode(nil, nil, nil, false)
+		parent.keys = append(parent.keys, midKey)
+		parent.children = append(parent.children, node, newNode)
+		parent.childNum += 2
 
-		if node.parent == nil {
-			parent := newUnionNode(nil, nil, nil, false)
-			parent.keys = append(parent.keys, midKey)
-			parent.children = append(parent.children, node, newINode)
-			parent.childNum += 2
-
-			node.parent = parent
-			newINode.parent = parent
-			t.root = parent
-		} else {
-			node.parent.insertNode(t, midKey, newINode)
-		}
+		node.parent = parent
+		newNode.parent = parent
+		t.root = parent
+	} else {
+		node.parent.insertNode(t, midKey, newNode)
 	}
 }
 
 func (node *UnionNode) borrow() bool {
 	parent := node.parent
-	if parent == nil {
-		return false
-	}
 	if node.isLeaf {
 		lNodeInParentIdx := getIdxInParent(node)
 		if node.leftPtr != nil && node.leftPtr.parent == parent && len(node.leftPtr.kvPairs) > MinKeys {
@@ -245,7 +203,6 @@ func (node *UnionNode) borrow() bool {
 
 			// 更改该节点 key children childNum属性
 			node.keys = append([]int{midKey}, node.keys...)
-			deleteNil(node)
 			leftLastChildIdx := len(leftINode.children) - 1
 
 			leftINode.children[leftLastChildIdx].parent = node
@@ -272,7 +229,6 @@ func (node *UnionNode) borrow() bool {
 
 			// 更改该节点 key children childNum属性
 			node.keys = append(node.keys, midKey)
-			deleteNil(node)
 
 			node.children = append(node.children, rightINode.children[0])
 			rightINode.children[0].parent = node
@@ -297,9 +253,6 @@ func (node *UnionNode) borrow() bool {
 
 func (node *UnionNode) merge(t *BPlusTree) {
 	parent := node.parent
-	if parent == nil {
-		return
-	}
 	if node.isLeaf {
 		rightLeafNode := node.rightPtr
 		leftLeafNode := node.leftPtr
@@ -337,10 +290,6 @@ func (node *UnionNode) merge(t *BPlusTree) {
 			// 无法合并
 			panic("In *Union.merge error")
 		}
-		// 删除 nil 指针
-		if len(node.children)-1 == node.childNum {
-			deleteNil(node)
-		}
 
 		// 更改子节点的父节点指向
 		for _, childPtr := range rightINode.children {
@@ -375,19 +324,6 @@ func getIdxInParent(node *UnionNode) int {
 		}
 	}
 	return -1
-}
-
-func deleteNil(node *UnionNode) {
-	if node == nil || len(node.keys) != len(node.children) {
-		return
-	}
-	for idx, childPtr := range node.children {
-		if childPtr == nil {
-			node.keys = append(node.keys[:idx], node.keys[idx+1:]...)
-			node.children = append(node.children[:idx], node.children[idx+1:]...)
-			break
-		}
-	}
 }
 
 type KVPair struct {
