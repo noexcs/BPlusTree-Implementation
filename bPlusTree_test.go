@@ -67,6 +67,19 @@ func TestBPlusTree(t *testing.T) {
 		fmt.Println(err)
 		return
 	}
+	for k, _ := range m {
+		_, exist := bPlusTree.Get(k)
+		if !exist {
+			t.Errorf("错误: 添加后不在")
+		}
+	}
+	iterator := bPlusTree.Iterator()
+	for iterator.Next() {
+		k, _ := iterator.Value()
+		if _, exist := m[k]; !exist {
+			t.Errorf("错误: 删除后仍在存在")
+		}
+	}
 }
 
 // Diagnose 检查结构是否正确

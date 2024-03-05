@@ -124,7 +124,7 @@ func (node *UnionNode) removeKey(t *BPlusTree, key int) bool {
 	if found {
 		node.kvPairs = append(node.kvPairs[:idx], node.kvPairs[idx+1:]...)
 	}
-	if len(node.kvPairs) < MinKeys && node.parent != nil {
+	if len(node.kvPairs) < MinKeys && node != t.root {
 		if !node.borrow() {
 			if len(node.kvPairs) == 0 {
 				if node.leftPtr != nil {
@@ -396,7 +396,8 @@ type KVPair struct {
 }
 
 type BPlusTree struct {
-	root *UnionNode
+	root          *UnionNode
+	firstLeafNode *UnionNode
 }
 
 func MakeNew() *BPlusTree {
@@ -425,7 +426,8 @@ func (t *BPlusTree) Get(key int) (any, bool) {
 // 返回key所在的leafNode, 或者应该插入的leafNode
 func (t *BPlusTree) findLeafNode(key int) (target *UnionNode) {
 	if t.root == nil {
-		t.root = newUnionNode(nil, nil, nil, true)
+		t.firstLeafNode = newUnionNode(nil, nil, nil, true)
+		t.root = t.firstLeafNode
 		return t.root
 	}
 	if t.root.isLeaf {
@@ -443,4 +445,34 @@ func (t *BPlusTree) findLeafNode(key int) (target *UnionNode) {
 			return cursor
 		}
 	}
+}
+
+func (t *BPlusTree) Iterator() *Iterator {
+	return &Iterator{
+		node: t.firstLeafNode,
+		idx:  0,
+	}
+}
+
+type Iterator struct {
+	node *UnionNode
+	idx  int
+}
+
+func (iter *Iterator) Next() bool {
+	return iter.node != nil && iter.idx < len(iter.node.kvPairs)
+}
+
+func (iter *Iterator) Value() (k int, v any) {
+	if !iter.Next() {
+		panic("No more elements.")
+	}
+	kvPair := iter.node.kvPairs[iter.idx]
+	if iter.idx+1 < len(iter.node.kvPairs) {
+		iter.idx += 1
+	} else {
+		iter.node = iter.node.rightPtr
+		iter.idx = 0
+	}
+	return kvPair.key, kvPair.value
 }
