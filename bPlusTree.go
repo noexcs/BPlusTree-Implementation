@@ -172,145 +172,137 @@ func (node *UnionNode) split(t *BPlusTree) {
 
 func (node *UnionNode) borrow() bool {
 	parent := node.parent
+	leftNodePtr := node.leftPtr
+	rightNodePtr := node.rightPtr
+	idxInParent := getIdxInParent(node)
 	if node.isLeaf {
-		lNodeInParentIdx := getIdxInParent(node)
-		if node.leftPtr != nil && node.leftPtr.parent == parent && len(node.leftPtr.kvPairs) > MinKeys {
+		if borrowable(leftNodePtr, node) {
 			// 先从左边借
-			leftLeafNodeKVNum := len(node.leftPtr.kvPairs)
-			node.kvPairs = append([]*KVPair{node.leftPtr.kvPairs[leftLeafNodeKVNum-1]}, node.kvPairs...)
-			node.leftPtr.kvPairs = node.leftPtr.kvPairs[:leftLeafNodeKVNum-1]
-			// 更新父节点指针对应的key的大小
-			parent.keys[lNodeInParentIdx-1] = node.kvPairs[0].key
+			node.kvPairs = append([]*KVPair{leftNodePtr.kvPairs[len(leftNodePtr.kvPairs)-1]}, node.kvPairs...)
+			leftNodePtr.kvPairs = leftNodePtr.kvPairs[:len(leftNodePtr.kvPairs)-1]
+			// 更新父节点指针对应的 key 的大小
+			parent.keys[idxInParent-1] = node.kvPairs[0].key
 			return true
-		} else if node.rightPtr != nil && node.rightPtr.parent == parent && len(node.rightPtr.kvPairs) > MinKeys {
-			// 再从右边借e
-			node.kvPairs = append(node.kvPairs, node.rightPtr.kvPairs[0])
-			node.rightPtr.kvPairs = node.rightPtr.kvPairs[1:]
+		} else if borrowable(rightNodePtr, node) {
+			// 再从右边借
+			node.kvPairs = append(node.kvPairs, rightNodePtr.kvPairs[0])
+			rightNodePtr.kvPairs = rightNodePtr.kvPairs[1:]
 			// 更新父节点指针对应的key的大小
-			parent.keys[lNodeInParentIdx] = node.rightPtr.kvPairs[0].key
+			parent.keys[idxInParent] = rightNodePtr.kvPairs[0].key
 			return true
 		}
-		return false
 	} else {
-		var iNodeInParentIdx = getIdxInParent(node)
-		leftINode := node.leftPtr
-		rightINode := node.rightPtr
-		if leftINode != nil && leftINode.parent == node.parent && len(leftINode.children) > MinChildren {
+		if borrowable(leftNodePtr, node) {
 			// 向左借（右旋）
-			midKey := parent.keys[iNodeInParentIdx-1]
+			midKey := parent.keys[idxInParent-1]
 			// 更改父节点 key
-			parent.keys[iNodeInParentIdx-1] = leftINode.keys[len(leftINode.keys)-1]
+			parent.keys[idxInParent-1] = leftNodePtr.keys[len(leftNodePtr.keys)-1]
 
-			// 更改该节点 key children childNum属性
+			// 更改该节点 key children childNum 属性
 			node.keys = append([]int{midKey}, node.keys...)
-			leftLastChildIdx := len(leftINode.children) - 1
-
-			leftINode.children[leftLastChildIdx].parent = node
-			node.children = append([]*UnionNode{leftINode.children[leftLastChildIdx]}, node.children...)
+			node.children = append([]*UnionNode{leftNodePtr.children[len(leftNodePtr.children)-1]}, node.children...)
 			node.childNum += 1
 
-			// 更改左节点 key children childNum属性
-			leftINode.keys = leftINode.keys[:len(leftINode.keys)-1]
-			leftINode.children = leftINode.children[:len(leftINode.children)-1]
-			leftINode.childNum -= 1
+			// 更改左节点 key children childNum 属性
+			leftNodePtr.keys = leftNodePtr.keys[:len(leftNodePtr.keys)-1]
+			leftNodePtr.children = leftNodePtr.children[:len(leftNodePtr.children)-1]
+			leftNodePtr.childNum -= 1
 
-			// 更改孩子节点左右指针
-			leftINode.children[len(leftINode.children)-1].rightPtr = nil
+			// 更改孩子节点父节点指针，以及左右指针
+			leftNodePtr.children[len(leftNodePtr.children)-1].rightPtr = nil
+			node.children[0].parent = node
 			node.children[0].leftPtr = nil
 			node.children[0].rightPtr = node.children[1]
 			node.children[1].leftPtr = node.children[0]
 
 			return true
-		} else if rightINode != nil && rightINode.parent == node.parent && len(rightINode.children) > MinChildren {
+		} else if borrowable(rightNodePtr, node) {
 			// 向右借（左旋）
-			midKey := parent.keys[iNodeInParentIdx]
+			midKey := parent.keys[idxInParent]
 			// 更改父节点 key
-			parent.keys[iNodeInParentIdx] = rightINode.keys[0]
+			parent.keys[idxInParent] = rightNodePtr.keys[0]
 
-			// 更改该节点 key children childNum属性
+			// 更改该节点 key children childNum 属性
 			node.keys = append(node.keys, midKey)
-
-			node.children = append(node.children, rightINode.children[0])
-			rightINode.children[0].parent = node
+			node.children = append(node.children, rightNodePtr.children[0])
 			node.childNum += 1
 
-			// 更改右节点 key children childNum属性
-			rightINode.keys = rightINode.keys[1:]
-			rightINode.children = rightINode.children[1:]
-			rightINode.childNum -= 1
+			// 更改右节点 key children childNum 属性
+			rightNodePtr.keys = rightNodePtr.keys[1:]
+			rightNodePtr.children = rightNodePtr.children[1:]
+			rightNodePtr.childNum -= 1
 
-			// 更改孩子节点左右指针
-			rightINode.children[0].leftPtr = nil
+			// 更改孩子节点父节点指针，以及左右指针
+			rightNodePtr.children[0].leftPtr = nil
+			node.children[len(node.children)-1].parent = node
 			node.children[len(node.children)-1].rightPtr = nil
 			node.children[len(node.children)-1].leftPtr = node.children[len(node.children)-2]
 			node.children[len(node.children)-2].rightPtr = node.children[len(node.children)-1]
 
 			return true
 		}
-		return false
 	}
+	return false
 }
 
 func (node *UnionNode) merge(t *BPlusTree) {
 	parent := node.parent
+	leftNodePtr := node.leftPtr
+	rightNodePtr := node.rightPtr
+
+	if mergeable(leftNodePtr) {
+		// 这里的合并到左边
+		rightNodePtr = node
+		if !node.isLeaf {
+			leftNodePtr.keys = append(leftNodePtr.keys, parent.keys[getIdxInParent(rightNodePtr)-1])
+		}
+	} else if mergeable(rightNodePtr) {
+		// 右边的合并到这里
+		leftNodePtr = node
+		if !node.isLeaf {
+			leftNodePtr.keys = append(leftNodePtr.keys, parent.keys[getIdxInParent(leftNodePtr)])
+		}
+	}
+
 	if node.isLeaf {
-		rightLeafNode := node.rightPtr
-		leftLeafNode := node.leftPtr
-		if leftLeafNode != nil && leftLeafNode.parent == node.parent && len(leftLeafNode.kvPairs) == MinKeys {
-			// 这里的合并到左边
-			leftLeafNode.kvPairs = append(leftLeafNode.kvPairs, node.kvPairs...)
-			if rightLeafNode != nil {
-				rightLeafNode.leftPtr = leftLeafNode
-			}
-			leftLeafNode.rightPtr = rightLeafNode
-			leftLeafNode.parent.removeChild(t, node)
-		} else if rightLeafNode != nil && rightLeafNode.parent == node.parent && len(rightLeafNode.kvPairs) == MinKeys {
-			// 右边的合并到这里
-			node.kvPairs = append(node.kvPairs, rightLeafNode.kvPairs...)
-			node.rightPtr = rightLeafNode.rightPtr
-			if rightLeafNode.rightPtr != nil {
-				rightLeafNode.rightPtr.leftPtr = node
-			}
-			node.parent.removeChild(t, rightLeafNode)
-		}
+		leftNodePtr.kvPairs = append(leftNodePtr.kvPairs, rightNodePtr.kvPairs...)
 	} else {
-		idxInParent := getIdxInParent(node)
-		leftINode := node.leftPtr
-		rightINode := node.rightPtr
-		midKey := 0
-		if leftINode != nil && leftINode.parent == parent && len(leftINode.children) == MinChildren {
-			midKey = parent.keys[idxInParent-1]
-			rightINode = node
-			node.keys = append([]int{midKey}, rightINode.keys...)
-		} else if rightINode != nil && rightINode.parent == parent && len(rightINode.children) == MinChildren {
-			midKey = parent.keys[idxInParent]
-			leftINode = node
-			node.keys = append(leftINode.keys, midKey)
-		} else {
-			// 无法合并
-			panic("In *Union.merge error")
+		for _, childPtr := range rightNodePtr.children {
+			childPtr.parent = leftNodePtr
 		}
+		leftNodePtr.keys = append(leftNodePtr.keys, rightNodePtr.keys...)
+		leftNodePtr.children = append(leftNodePtr.children, rightNodePtr.children...)
+		leftNodePtr.children[leftNodePtr.childNum-1].rightPtr = leftNodePtr.children[leftNodePtr.childNum]
+		leftNodePtr.children[leftNodePtr.childNum].leftPtr = leftNodePtr.children[leftNodePtr.childNum-1]
+		leftNodePtr.childNum += rightNodePtr.childNum
+	}
 
-		// 更改子节点的父节点指向
-		for _, childPtr := range rightINode.children {
-			childPtr.parent = leftINode
-		}
+	leftNodePtr.rightPtr = rightNodePtr.rightPtr
+	if rightNodePtr.rightPtr != nil {
+		rightNodePtr.rightPtr.leftPtr = leftNodePtr
+	}
+	parent.removeChild(t, rightNodePtr)
+}
 
-		// 右边合并到左边
-		leftINode.keys = append(leftINode.keys, rightINode.keys...)
-		leftINode.children = append(leftINode.children, rightINode.children...)
+func mergeable(node *UnionNode) bool {
+	if node == nil {
+		return false
+	}
+	if node.isLeaf {
+		return len(node.kvPairs) == MinKeys
+	} else {
+		return len(node.children) == MinChildren
+	}
+}
 
-		leftINode.children[leftINode.childNum-1].rightPtr = leftINode.children[leftINode.childNum]
-		leftINode.children[leftINode.childNum].leftPtr = leftINode.children[leftINode.childNum-1]
-
-		// 更改 左右指针 childNum
-		leftINode.rightPtr = rightINode.rightPtr
-		if rightINode.rightPtr != nil {
-			rightINode.rightPtr.leftPtr = leftINode
-		}
-		leftINode.childNum += rightINode.childNum
-
-		parent.removeChild(t, rightINode)
+func borrowable(node *UnionNode, borrower *UnionNode) bool {
+	if node == nil || borrower == nil {
+		return false
+	}
+	if node.isLeaf {
+		return node.parent == borrower.parent && len(node.kvPairs) > MinKeys
+	} else {
+		return len(node.children) > MinChildren
 	}
 }
 
