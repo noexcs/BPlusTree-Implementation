@@ -31,7 +31,6 @@ type UnionNode struct {
 
 	// internalNode field
 	keys     []int
-	childNum int
 	children []*UnionNode
 
 	// leafNode field
@@ -66,7 +65,6 @@ func (node *UnionNode) insertKeyValue(t *BPlusTree, key int, value any) {
 	} else {
 		node.kvPairs = append(node.kvPairs[:idx], append([]*KVPair{{key, value}}, node.kvPairs[idx:]...)...)
 	}
-	// 是否需要分裂
 	if len(node.kvPairs) > MaxKeys {
 		node.split(t)
 	}
@@ -78,11 +76,11 @@ func (node *UnionNode) insertNode(t *BPlusTree, key int, childNode *UnionNode) {
 	})
 	node.keys = append(node.keys[:insertKeyIdx], append([]int{key}, node.keys[insertKeyIdx:]...)...)
 	node.children = append(node.children[:insertKeyIdx+1], append([]*UnionNode{childNode}, node.children[insertKeyIdx+1:]...)...)
-	node.childNum += 1
 	if len(node.children) > MaxChildren {
 		node.split(t)
 	}
 }
+
 func (node *UnionNode) removeChild(t *BPlusTree, childNode *UnionNode) {
 	for idx, childPtr := range node.children {
 		if childPtr == childNode {
@@ -92,7 +90,6 @@ func (node *UnionNode) removeChild(t *BPlusTree, childNode *UnionNode) {
 				node.keys = append(node.keys[:idx-1], node.keys[idx:]...)
 			}
 			node.children = append(node.children[:idx], node.children[idx+1:]...)
-			node.childNum -= 1
 			if node.parent == t.root && len(node.children) == 1 {
 				t.root = node.children[0]
 				t.root.parent = nil
@@ -100,12 +97,13 @@ func (node *UnionNode) removeChild(t *BPlusTree, childNode *UnionNode) {
 			break
 		}
 	}
-	if node != t.root && node.childNum < MinChildren {
+	if node != t.root && len(node.children) < MinChildren {
 		if !node.borrow() {
 			node.merge(t)
 		}
 	}
 }
+
 func (node *UnionNode) removeKey(t *BPlusTree, key int) bool {
 	idx, found := slices.BinarySearchFunc(node.kvPairs, key, func(kvPair *KVPair, k int) int {
 		return kvPair.key - k
@@ -120,6 +118,7 @@ func (node *UnionNode) removeKey(t *BPlusTree, key int) bool {
 	}
 	return found
 }
+
 func (node *UnionNode) split(t *BPlusTree) {
 	newNode := newUnionNode(node.parent, node, node.rightPtr, node.isLeaf)
 	midKey := 0
@@ -136,7 +135,6 @@ func (node *UnionNode) split(t *BPlusTree) {
 		// 新的节点只包含 midKeyIdx 后面的key
 		newNode.keys = append(newNode.keys, node.keys[midKeyIdx+1:]...)
 		newNode.children = append(newNode.children, node.children[midKeyIdx+1:]...)
-		newNode.childNum += len(newNode.children)
 		// 更改新节点的孩子的父节点为新节点
 		for i := 0; i < len(newNode.children); i++ {
 			newNode.children[i].parent = newNode
@@ -144,7 +142,6 @@ func (node *UnionNode) split(t *BPlusTree) {
 
 		node.keys = node.keys[:midKeyIdx]
 		node.children = node.children[:midKeyIdx+1]
-		node.childNum -= newNode.childNum
 
 		// 原本的 ChildPtr 不再是同一个父节点，更改对应的指针为 nil
 		if !node.children[len(node.children)-1].isLeaf {
@@ -160,7 +157,6 @@ func (node *UnionNode) split(t *BPlusTree) {
 		parent := newUnionNode(nil, nil, nil, false)
 		parent.keys = append(parent.keys, midKey)
 		parent.children = append(parent.children, node, newNode)
-		parent.childNum += 2
 
 		node.parent = parent
 		newNode.parent = parent
@@ -198,15 +194,13 @@ func (node *UnionNode) borrow() bool {
 			// 更改父节点 key
 			parent.keys[idxInParent-1] = leftNodePtr.keys[len(leftNodePtr.keys)-1]
 
-			// 更改该节点 key children childNum 属性
+			// 更改该节点 key children 属性
 			node.keys = append([]int{midKey}, node.keys...)
 			node.children = append([]*UnionNode{leftNodePtr.children[len(leftNodePtr.children)-1]}, node.children...)
-			node.childNum += 1
 
-			// 更改左节点 key children childNum 属性
+			// 更改左节点 key children 属性
 			leftNodePtr.keys = leftNodePtr.keys[:len(leftNodePtr.keys)-1]
 			leftNodePtr.children = leftNodePtr.children[:len(leftNodePtr.children)-1]
-			leftNodePtr.childNum -= 1
 
 			// 更改孩子节点父节点指针，以及左右指针
 			leftNodePtr.children[len(leftNodePtr.children)-1].rightPtr = nil
@@ -222,15 +216,13 @@ func (node *UnionNode) borrow() bool {
 			// 更改父节点 key
 			parent.keys[idxInParent] = rightNodePtr.keys[0]
 
-			// 更改该节点 key children childNum 属性
+			// 更改该节点 key children 属性
 			node.keys = append(node.keys, midKey)
 			node.children = append(node.children, rightNodePtr.children[0])
-			node.childNum += 1
 
-			// 更改右节点 key children childNum 属性
+			// 更改右节点 key children 属性
 			rightNodePtr.keys = rightNodePtr.keys[1:]
 			rightNodePtr.children = rightNodePtr.children[1:]
-			rightNodePtr.childNum -= 1
 
 			// 更改孩子节点父节点指针，以及左右指针
 			rightNodePtr.children[0].leftPtr = nil
@@ -271,10 +263,10 @@ func (node *UnionNode) merge(t *BPlusTree) {
 			childPtr.parent = leftNodePtr
 		}
 		leftNodePtr.keys = append(leftNodePtr.keys, rightNodePtr.keys...)
+
+		leftNodePtr.children[len(leftNodePtr.children)-1].rightPtr = rightNodePtr.children[0]
+		rightNodePtr.children[0].leftPtr = leftNodePtr.children[len(leftNodePtr.children)-1]
 		leftNodePtr.children = append(leftNodePtr.children, rightNodePtr.children...)
-		leftNodePtr.children[leftNodePtr.childNum-1].rightPtr = leftNodePtr.children[leftNodePtr.childNum]
-		leftNodePtr.children[leftNodePtr.childNum].leftPtr = leftNodePtr.children[leftNodePtr.childNum-1]
-		leftNodePtr.childNum += rightNodePtr.childNum
 	}
 
 	leftNodePtr.rightPtr = rightNodePtr.rightPtr

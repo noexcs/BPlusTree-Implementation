@@ -67,7 +67,7 @@ func TestBPlusTree(t *testing.T) {
 		fmt.Println(err)
 		return
 	}
-	for k, _ := range m {
+	for k := range m {
 		_, exist := bPlusTree.Get(k)
 		if !exist {
 			t.Errorf("错误: 添加后不在")
@@ -99,10 +99,6 @@ func Diagnose(t *BPlusTree, output io.Writer) bool {
 				if leafOccurred {
 					// 因为是层序遍历，所以如果出现过叶子节点，就不可能再出现内部节点
 					fmt.Fprintf(output, "错误：叶子节点不在同一深度")
-				}
-				if cursor.childNum != len(cursor.children) {
-					fmt.Fprintf(output, "错误: 子节点数量不符。")
-					return false
 				}
 				if cursor.parent != nil && (len(cursor.children) < MinChildren || MaxChildren < len(cursor.children)) {
 					fmt.Fprintf(output, "错误: InternalNode 大小不合法。")
